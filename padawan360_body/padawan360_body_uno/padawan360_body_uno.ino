@@ -1,46 +1,5 @@
 
 
-// =======================================================================================
-// /////////////////////////Padawan360 Body Code v2.0 - UNO ////////////////////////////////////
-// =======================================================================================
-/*
-by Dan Kraus
-dskraus@gmail.com
-Astromech: danomite4047
-
-Heavily influenced by DanF's Padwan code which was built for Arduino+Wireless PS2
-controller leveraging Bill Porter's PS2X Library. I was running into frequent disconnect
-issues with 4 different controllers working in various capacities or not at all. I decided
-that PS2 Controllers were going to be more difficult to come by every day, so I explored
-some existing libraries out there to leverage and came across the USB Host Shield and it's
-support for PS3 and Xbox 360 controllers. Bluetooth dongles were inconsistent as well
-so I wanted to be able to have something with parts that other builder's could easily track
-down and buy parts even at your local big box store.
-
-v2.0 Changes:
-- Makes left analog stick default drive control stick. Configurable between left or right stick via isLeftStickDrive 
-
-Hardware:
-***Arduino UNO***
-USB Host Shield from circuits@home
-Microsoft Xbox 360 Controller
-Xbox 360 USB Wireless Reciver
-Sabertooth Motor Controller
-Syren Motor Controller
-Sparkfun MP3 Trigger
-
-This sketch supports DOES NOT SUPPORT I2C
-It is NOT YET set up for Dan's method of using the serial packet to transfer data up to the dome
-to trigger some light effects. If you want that, you'll need to reference DanF's original
-Padawan code or update it yourself and ask me to merge your updates into this one :)
-
-Set Sabertooth 2x25/2x12 Dip Switches 1 and 2 Down, All Others Up
-For SyRen Simple Serial Set Switches 1 and 2 Down, All Others Up
-For SyRen Simple Serial Set Switchs 2 & 4 Down, All Others Up
-Placed a 10K ohm resistor between S1 & GND on the SyRen 10 itself
-
-*/
-
 //************************** Set speed and turn speeds here************************************//
 
 //set these 3 to whatever speeds work for you. 0-stop, 127-full speed.
@@ -97,7 +56,6 @@ const int DOMEBAUDRATE = 2400;
 #include <Sabertooth.h>
 #include <SyRenSimplified.h>
 #include <Servo.h>
-#include <MP3Trigger.h>
 #include <DFMiniMp3.h>
 #include <XBOXRECV.h>
 
@@ -161,9 +119,64 @@ ButtonEnum hpLightToggleButton;
 
 boolean isHPOn = false;
 
+class Mp3Notify; 
 
+// define a handy type using serial and our notify class
+//
+typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3; 
 
-MP3Trigger mp3Trigger;
+// instance a DfMp3 object, 
+//
+DfMp3 dfmp3(Serial);
+//SoftwareSerial secondarySerial(10, 11); // RX, TX
+//typedef DFMiniMp3<SoftwareSerial, Mp3Notify> DfMp3;
+//DfMp3 dfmp3(secondarySerial);
+
+class Mp3Notify
+{
+public:
+  static void PrintlnSourceAction(DfMp3_PlaySources source, const char* action)
+  {
+    if (source & DfMp3_PlaySources_Sd) 
+    {
+        Serial.print("SD Card, ");
+    }
+    if (source & DfMp3_PlaySources_Usb) 
+    {
+        Serial.print("USB Disk, ");
+    }
+    if (source & DfMp3_PlaySources_Flash) 
+    {
+        Serial.print("Flash, ");
+    }
+    Serial.println(action);
+  }
+  static void OnError([[maybe_unused]] DfMp3& mp3, uint16_t errorCode)
+  {
+    // see DfMp3_Error for code meaning
+    Serial.println();
+    Serial.print("Com Error ");
+    Serial.println(errorCode);
+  }
+  static void OnPlayFinished([[maybe_unused]] DfMp3& mp3, [[maybe_unused]] DfMp3_PlaySources source, uint16_t track)
+  {
+    Serial.print("Play finished for #");
+    Serial.println(track);  
+  }
+  static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "online");
+  }
+  static void OnPlaySourceInserted([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "inserted");
+  }
+  static void OnPlaySourceRemoved([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "removed");
+  }
+};
+
 USB Usb;
 XBOXRECV Xbox(&Usb);
 
@@ -201,8 +214,24 @@ void setup(){
   pinMode(EXTINGUISHERPIN, OUTPUT);
   digitalWrite(EXTINGUISHERPIN, HIGH);
 
-  mp3Trigger.setup();
-  mp3Trigger.setVolume(vol);
+  dfmp3.begin();
+  //Serial.begin(115200);
+  //dfmp3.reset();
+
+  uint16_t vol = dfmp3.getVolume();
+  Serial.print("volume ");
+  Serial.println(vol);
+  dfmp3.setVolume(10);
+
+  uint16_t count = dfmp3.getTotalTrackCount(DfMp3_PlaySource_Sd);
+  Serial.print("files ");
+  Serial.println(count);
+
+  uint16_t mode = dfmp3.getPlaybackMode();
+  Serial.print("playback mode ");
+  Serial.println(mode);
+  
+  Serial.println("starting...");
 
   if(isLeftStickDrive) {
     throttleAxis = LeftHatY;
@@ -220,14 +249,14 @@ void setup(){
   }
 
 
-   //Serial.begin(115200);
+//   Serial.begin(115200);
   // Wait for serial port to connect - used on Leonardo, Teensy and other boards with built-in USB CDC serial connection
   while (!Serial);
     if (Usb.Init() == -1) {
-      //Serial.print(F("\r\nOSC did not start"));
+      Serial.print(F("\r\nOSC did not start"));
       while (1); //halt
     }
-  //Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
+  Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
 }
 
 
@@ -247,7 +276,7 @@ void loop(){
   // After the controller connects, Blink all the LEDs so we know drives are disengaged at start
   if(!firstLoadOnConnect){
     firstLoadOnConnect = true;
-    mp3Trigger.play(21);
+    dfmp3.playGlobalTrack(21);
     Xbox.setLedMode(ROTATING, 0);
   }
   
@@ -262,10 +291,10 @@ void loop(){
     if(isDriveEnabled){
       isDriveEnabled = false;
       Xbox.setLedMode(ROTATING, 0);
-      mp3Trigger.play(53);
+      dfmp3.playGlobalTrack(53);
     } else {
       isDriveEnabled = true;
-      mp3Trigger.play(52);
+      dfmp3.playGlobalTrack(52);
       // //When the drive is enabled, set our LED accordingly to indicate speed
       if(drivespeed == DRIVESPEED1){
         Xbox.setLedOn(LED1, 0);
@@ -282,10 +311,10 @@ void loop(){
     if(isInAutomationMode){
       isInAutomationMode = false;
       automateAction = 0;
-      mp3Trigger.play(53);
+      dfmp3.playGlobalTrack(53);
     } else {
       isInAutomationMode = true;
-      mp3Trigger.play(52);
+      dfmp3.playGlobalTrack(52);
     }
   }
 
@@ -298,7 +327,7 @@ void loop(){
       automateAction = random(1,5);
 
       if(automateAction > 1){
-        mp3Trigger.play(random(32,52));
+        dfmp3.playGlobalTrack(random(32,52));
       }
       if(automateAction < 4){
         #if defined(SYRENSIMPLE)
@@ -334,16 +363,18 @@ void loop(){
     if(Xbox.getButtonPress(R1, 0)){
       if (vol > 0){
         vol--;
-        mp3Trigger.setVolume(vol);
+        dfmp3.setVolume(vol);
+        Serial.print(vol);
       }
     }
   }
   if(Xbox.getButtonClick(DOWN, 0)){
     //volume down
     if(Xbox.getButtonPress(R1, 0)){
-      if (vol < 255){
+      if (vol < 30){
         vol++;
-        mp3Trigger.setVolume(vol);
+        dfmp3.setVolume(vol);
+        Serial.print(vol);
       }
     }
   }
@@ -381,39 +412,39 @@ void loop(){
   // Y Button and Y combo buttons
   if(Xbox.getButtonClick(Y, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      mp3Trigger.play(8);
+      dfmp3.playGlobalTrack(8);
     } else if(Xbox.getButtonPress(L2, 0)){
-      mp3Trigger.play(2);
+      dfmp3.playGlobalTrack(2);
     } else if(Xbox.getButtonPress(R1, 0)){
-      mp3Trigger.play(9);
+      dfmp3.playGlobalTrack(9);
     } else {
-      mp3Trigger.play(random(13,17));
+      dfmp3.playGlobalTrack(random(13,17));
     }
   }
 
   // A Button and A combo Buttons
   if(Xbox.getButtonClick(A, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      mp3Trigger.play(6);
+      dfmp3.playGlobalTrack(6);
     } else if(Xbox.getButtonPress(L2, 0)){
-      mp3Trigger.play(1);
+      dfmp3.playGlobalTrack(1);
     } else if(Xbox.getButtonPress(R1, 0)){
-      mp3Trigger.play(11);
+      dfmp3.playGlobalTrack(11);
     } else {
-      mp3Trigger.play(random(17,25));
+      dfmp3.playGlobalTrack(random(17,25));
     }
   }
 
   // B Button and B combo Buttons
   if(Xbox.getButtonClick(B, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      mp3Trigger.play(7);
+      dfmp3.playGlobalTrack(7);
     } else if(Xbox.getButtonPress(L2, 0)){
-      mp3Trigger.play(3);
+      dfmp3.playGlobalTrack(3);
     } else if(Xbox.getButtonPress(R1, 0)){
-      mp3Trigger.play(10);
+      dfmp3.playGlobalTrack(10);
     } else {
-      mp3Trigger.play(random(32,52));
+      dfmp3.playGlobalTrack(random(32,52));
     }
   }
 
@@ -421,13 +452,13 @@ void loop(){
   if(Xbox.getButtonClick(X, 0)){
     // leia message L1+X
     if(Xbox.getButtonPress(L1, 0)){
-      mp3Trigger.play(5);
+      dfmp3.playGlobalTrack(5);
     } else if(Xbox.getButtonPress(L2, 0)){
-      mp3Trigger.play(4);
+      dfmp3.playGlobalTrack(4);
     } else if(Xbox.getButtonPress(R1, 0)){
-      mp3Trigger.play(12);
+      dfmp3.playGlobalTrack(12);
     } else {
-      mp3Trigger.play(random(25,32));
+      dfmp3.playGlobalTrack(random(25,32));
     }
   }
 
@@ -457,18 +488,18 @@ void loop(){
       //change to medium speed and play sound 3-tone
       drivespeed = DRIVESPEED2;
       Xbox.setLedOn(LED2, 0);
-      mp3Trigger.play(53);
+      dfmp3.playGlobalTrack(53);
     } else if(drivespeed == DRIVESPEED2 && (DRIVESPEED3!=0)){
       //change to high speed and play sound scream
       drivespeed = DRIVESPEED3;
       Xbox.setLedOn(LED3, 0);
-      mp3Trigger.play(1);
+      dfmp3.playGlobalTrack(1);
     } else {
       //we must be in high speed
       //change to low speed and play sound 2-tone
       drivespeed = DRIVESPEED1;
       Xbox.setLedOn(LED1, 0);
-      mp3Trigger.play(52);
+      dfmp3.playGlobalTrack(52);
     }
   }
 
