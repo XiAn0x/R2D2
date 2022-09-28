@@ -1,3 +1,5 @@
+
+
 // =======================================================================================
 // /////////////////////////Padawan360 Body Code v2.0 - UNO ////////////////////////////////////
 // =======================================================================================
@@ -96,6 +98,7 @@ const int DOMEBAUDRATE = 2400;
 #include <SyRenSimplified.h>
 #include <Servo.h>
 #include <MP3Trigger.h>
+#include <DFMiniMp3.h>
 #include <XBOXRECV.h>
 
 #include <SoftwareSerial.h>
