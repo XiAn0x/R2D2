@@ -79,7 +79,7 @@ Sabertooth SyR(128, SyRSerial);
 
 // Set some defaults for start up
 // 0 = full volume, 255 off
-byte vol = 20;
+byte vol = 10;
 // 0 = drive motors off ( right stick disabled ) at start
 boolean isDriveEnabled = false;
 
@@ -218,10 +218,10 @@ void setup(){
   //Serial.begin(115200);
   //dfmp3.reset();
 
-  uint16_t vol = dfmp3.getVolume();
-  Serial.print("volume ");
-  Serial.println(vol);
-  dfmp3.setVolume(10);
+  //uint16_t vol = dfmp3.getVolume();
+  //Serial.print("volume ");
+  //Serial.println(vol);
+  dfmp3.setVolume(vol);
 
   uint16_t count = dfmp3.getTotalTrackCount(DfMp3_PlaySource_Sd);
   Serial.print("files ");
@@ -253,7 +253,7 @@ void setup(){
   // Wait for serial port to connect - used on Leonardo, Teensy and other boards with built-in USB CDC serial connection
   while (!Serial);
     if (Usb.Init() == -1) {
-      Serial.print(F("\r\nOSC did not start"));
+      //Serial.print(F("\r\nOSC did not start"));
       while (1); //halt
     }
   Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
@@ -364,17 +364,17 @@ void loop(){
       if (vol > 0){
         vol--;
         dfmp3.setVolume(vol);
-        Serial.print(vol);
+        //Serial.print(vol);
       }
     }
   }
   if(Xbox.getButtonClick(DOWN, 0)){
     //volume down
     if(Xbox.getButtonPress(R1, 0)){
-      if (vol < 30){
+      if (vol < 20){
         vol++;
         dfmp3.setVolume(vol);
-        Serial.print(vol);
+        //Serial.print(vol);
       }
     }
   }
