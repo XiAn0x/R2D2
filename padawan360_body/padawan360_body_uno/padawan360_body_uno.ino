@@ -1,5 +1,3 @@
-
-
 //************************** Set speed and turn speeds here************************************//
 
 //set these 3 to whatever speeds work for you. 0-stop, 127-full speed.
