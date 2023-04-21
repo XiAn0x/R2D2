@@ -41,23 +41,28 @@ const byte DRIVEDEADZONERANGE = 20;
 // for packetized options are: 2400, 9600, 19200 and 38400. I think you need to pick one that works
 // and I think it varies across different firmware versions.
 // for simple serial use 9600
-const int DOMEBAUDRATE = 2400;
+const int DOMEBAUDRATE = 9600;
 
 // Comment the SYRENSIMPLE out for packetized serial connection to Syren - Recomended.
 // I've never tested Syrene Simple, it's a carry-over from DanF's library.
 // Un-comment for simple serial - do not use in close contact with people
 //#define SYRENSIMPLE
 
-// I have a pin set to pull a relay high/low to trigger my upside down compressed air like R2's extinguisher
 #define EXTINGUISHERPIN 3
 
 #include <Sabertooth.h>
 #include <SyRenSimplified.h>
 #include <Servo.h>
-#include <DFMiniMp3.h>
+#include <MD_YX5300.h>
 #include <XBOXRECV.h>
-
 #include <SoftwareSerial.h>
+
+// Connections for serial interface to the YX5300 module
+#define MP3Stream Serial  // Native serial port - change to suit the application
+
+// Define global variables
+MD_YX5300 mp3(MP3Stream);
+
 // These are the pins for the Sabertooth and Syren
 SoftwareSerial STSerial(NOT_A_PIN, 4);
 SoftwareSerial SyRSerial(2, 5);
@@ -77,9 +82,15 @@ Sabertooth SyR(128, SyRSerial);
 
 // Set some defaults for start up
 // 0 = full volume, 255 off
-byte vol = 10;
+int vol = 14;
+
 // 0 = drive motors off ( right stick disabled ) at start
 boolean isDriveEnabled = false;
+
+USB Usb;
+XBOXRECV Xbox(&Usb);
+
+// read the switboolean isDriveEnabled = false;
 
 // Automated function variables
 // Used as a boolean to turn on/off automated functions like periodic random sounds and periodic dome turns
@@ -104,81 +115,14 @@ AnalogHatEnum domeAxis;
 ButtonEnum speedSelectButton;
 ButtonEnum hpLightToggleButton;
 
-// this is legacy right now. The rest of the sketch isn't set to send any of this
-// data to another arduino like the original Padawan sketch does
-// right now just using it to track whether or not the HP light is on so we can
-//struct SEND_DATA_STRUCTURE{
-//  //put your variable definitions here for the data you want to send
-//  //THIS MUST BE EXACTLY THE SAME ON THE OTHER ARDUINO
-//  int hpl; // hp light
-//  int dsp; // 0 = random, 1 = alarm, 5 = leia, 11 = alarm2, 100 = no change
-//};
-//SEND_DATA_STRUCTURE domeData;//give a name to the group of data
 
 boolean isHPOn = false;
 
-class Mp3Notify; 
-
-// define a handy type using serial and our notify class
-//
-typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3; 
-
-// instance a DfMp3 object, 
-//
-DfMp3 dfmp3(Serial);
-//SoftwareSerial secondarySerial(10, 11); // RX, TX
-//typedef DFMiniMp3<SoftwareSerial, Mp3Notify> DfMp3;
-//DfMp3 dfmp3(secondarySerial);
-
-class Mp3Notify
-{
-public:
-  static void PrintlnSourceAction(DfMp3_PlaySources source, const char* action)
-  {
-    if (source & DfMp3_PlaySources_Sd) 
-    {
-        Serial.print("SD Card, ");
-    }
-    if (source & DfMp3_PlaySources_Usb) 
-    {
-        Serial.print("USB Disk, ");
-    }
-    if (source & DfMp3_PlaySources_Flash) 
-    {
-        Serial.print("Flash, ");
-    }
-    Serial.println(action);
-  }
-  static void OnError([[maybe_unused]] DfMp3& mp3, uint16_t errorCode)
-  {
-    // see DfMp3_Error for code meaning
-    Serial.println();
-    Serial.print("Com Error ");
-    Serial.println(errorCode);
-  }
-  static void OnPlayFinished([[maybe_unused]] DfMp3& mp3, [[maybe_unused]] DfMp3_PlaySources source, uint16_t track)
-  {
-    Serial.print("Play finished for #");
-    Serial.println(track);  
-  }
-  static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
-  {
-    PrintlnSourceAction(source, "online");
-  }
-  static void OnPlaySourceInserted([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
-  {
-    PrintlnSourceAction(source, "inserted");
-  }
-  static void OnPlaySourceRemoved([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
-  {
-    PrintlnSourceAction(source, "removed");
-  }
-};
-
-USB Usb;
-XBOXRECV Xbox(&Usb);
-
 void setup(){
+  MP3Stream.begin(MD_YX5300::SERIAL_BPS);
+  mp3.begin();
+  // Serial.begin(115200);
+  mp3.volume(vol);
   SyRSerial.begin(DOMEBAUDRATE);
   #if defined(SYRENSIMPLE)
     SyR.motor(0);
@@ -212,25 +156,6 @@ void setup(){
   pinMode(EXTINGUISHERPIN, OUTPUT);
   digitalWrite(EXTINGUISHERPIN, HIGH);
 
-  dfmp3.begin();
-  //Serial.begin(115200);
-  //dfmp3.reset();
-
-  //uint16_t vol = dfmp3.getVolume();
-  //Serial.print("volume ");
-  //Serial.println(vol);
-  dfmp3.setVolume(vol);
-
-  uint16_t count = dfmp3.getTotalTrackCount(DfMp3_PlaySource_Sd);
-  Serial.print("files ");
-  Serial.println(count);
-
-  uint16_t mode = dfmp3.getPlaybackMode();
-  Serial.print("playback mode ");
-  Serial.println(mode);
-  
-  Serial.println("starting...");
-
   if(isLeftStickDrive) {
     throttleAxis = LeftHatY;
     turnAxis = LeftHatX;
@@ -260,6 +185,7 @@ void setup(){
 
 void loop(){
   Usb.Task();
+  mp3.getStatus();
   // if we're not connected, return so we don't bother doing anything else.
   // set all movement to 0 so if we lose connection we don't have a runaway droid!
   // a restraining bolt and jawa droid caller won't save us here!
@@ -274,7 +200,7 @@ void loop(){
   // After the controller connects, Blink all the LEDs so we know drives are disengaged at start
   if(!firstLoadOnConnect){
     firstLoadOnConnect = true;
-    dfmp3.playGlobalTrack(21);
+    mp3.playTrack(21);
     Xbox.setLedMode(ROTATING, 0);
   }
   
@@ -289,10 +215,10 @@ void loop(){
     if(isDriveEnabled){
       isDriveEnabled = false;
       Xbox.setLedMode(ROTATING, 0);
-      dfmp3.playGlobalTrack(53);
+      mp3.playTrack(53);
     } else {
       isDriveEnabled = true;
-      dfmp3.playGlobalTrack(52);
+      mp3.playTrack(52);
       // //When the drive is enabled, set our LED accordingly to indicate speed
       if(drivespeed == DRIVESPEED1){
         Xbox.setLedOn(LED1, 0);
@@ -309,10 +235,10 @@ void loop(){
     if(isInAutomationMode){
       isInAutomationMode = false;
       automateAction = 0;
-      dfmp3.playGlobalTrack(53);
+      mp3.playTrack(53);
     } else {
       isInAutomationMode = true;
-      dfmp3.playGlobalTrack(52);
+      mp3.playTrack(52);
     }
   }
 
@@ -325,7 +251,7 @@ void loop(){
       automateAction = random(1,5);
 
       if(automateAction > 1){
-        dfmp3.playGlobalTrack(random(32,52));
+        mp3.playTrack(random(32,52));
       }
       if(automateAction < 4){
         #if defined(SYRENSIMPLE)
@@ -359,20 +285,18 @@ void loop(){
   if(Xbox.getButtonClick(UP, 0)){
     // volume up
     if(Xbox.getButtonPress(R1, 0)){
-      if (vol > 0){
-        vol--;
-        dfmp3.setVolume(vol);
-        //Serial.print(vol);
+      if (vol < 30){
+        vol = vol + 2;
+        mp3.volume(vol);
       }
     }
   }
   if(Xbox.getButtonClick(DOWN, 0)){
     //volume down
     if(Xbox.getButtonPress(R1, 0)){
-      if (vol < 20){
-        vol++;
-        dfmp3.setVolume(vol);
-        //Serial.print(vol);
+      if (vol > 0){
+        vol = vol - 2;
+        mp3.volume(vol);
       }
     }
   }
@@ -410,39 +334,39 @@ void loop(){
   // Y Button and Y combo buttons
   if(Xbox.getButtonClick(Y, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      dfmp3.playGlobalTrack(8);
+      mp3.playTrack(8);
     } else if(Xbox.getButtonPress(L2, 0)){
-      dfmp3.playGlobalTrack(2);
+      mp3.playTrack(2);
     } else if(Xbox.getButtonPress(R1, 0)){
-      dfmp3.playGlobalTrack(9);
+      mp3.playTrack(9);
     } else {
-      dfmp3.playGlobalTrack(random(13,17));
+      mp3.playTrack(random(13,17));
     }
   }
 
   // A Button and A combo Buttons
   if(Xbox.getButtonClick(A, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      dfmp3.playGlobalTrack(6);
+      mp3.playTrack(6);
     } else if(Xbox.getButtonPress(L2, 0)){
-      dfmp3.playGlobalTrack(1);
+      mp3.playTrack(1);
     } else if(Xbox.getButtonPress(R1, 0)){
-      dfmp3.playGlobalTrack(11);
+      mp3.playTrack(11);
     } else {
-      dfmp3.playGlobalTrack(random(17,25));
+      mp3.playTrack(random(17,25));
     }
   }
 
   // B Button and B combo Buttons
   if(Xbox.getButtonClick(B, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      dfmp3.playGlobalTrack(7);
+      mp3.playTrack(7);
     } else if(Xbox.getButtonPress(L2, 0)){
-      dfmp3.playGlobalTrack(3);
+      mp3.playTrack(3);
     } else if(Xbox.getButtonPress(R1, 0)){
-      dfmp3.playGlobalTrack(10);
+      mp3.playTrack(10);
     } else {
-      dfmp3.playGlobalTrack(random(32,52));
+      mp3.playTrack(random(32,52));
     }
   }
 
@@ -450,13 +374,13 @@ void loop(){
   if(Xbox.getButtonClick(X, 0)){
     // leia message L1+X
     if(Xbox.getButtonPress(L1, 0)){
-      dfmp3.playGlobalTrack(5);
+      mp3.playTrack(5);
     } else if(Xbox.getButtonPress(L2, 0)){
-      dfmp3.playGlobalTrack(4);
+      mp3.playTrack(4);
     } else if(Xbox.getButtonPress(R1, 0)){
-      dfmp3.playGlobalTrack(12);
+      mp3.playTrack(12);
     } else {
-      dfmp3.playGlobalTrack(random(25,32));
+      mp3.playTrack(random(25,32));
     }
   }
 
@@ -486,18 +410,18 @@ void loop(){
       //change to medium speed and play sound 3-tone
       drivespeed = DRIVESPEED2;
       Xbox.setLedOn(LED2, 0);
-      dfmp3.playGlobalTrack(53);
+      mp3.playTrack(53);
     } else if(drivespeed == DRIVESPEED2 && (DRIVESPEED3!=0)){
       //change to high speed and play sound scream
       drivespeed = DRIVESPEED3;
       Xbox.setLedOn(LED3, 0);
-      dfmp3.playGlobalTrack(1);
+      mp3.playTrack(1);
     } else {
       //we must be in high speed
       //change to low speed and play sound 2-tone
       drivespeed = DRIVESPEED1;
       Xbox.setLedOn(LED1, 0);
-      dfmp3.playGlobalTrack(52);
+      mp3.playTrack(52);
     }
   }
 
