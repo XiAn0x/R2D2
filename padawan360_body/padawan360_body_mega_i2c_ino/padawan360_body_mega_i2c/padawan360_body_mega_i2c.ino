@@ -109,7 +109,7 @@ int turnDirection = 20;
 #define EXTINGUISHERPIN 3
 
 #include <Sabertooth.h>
-#include <DFMiniMp3.h>
+#include <MP3Trigger.h>
 #include <Wire.h>
 #include <XBOXRECV.h>
 
@@ -165,66 +165,7 @@ boolean isHPOn = false;
 
 
 
-//MP3Trigger mp3Trigger;
-
-class Mp3Notify; 
-
-// define a handy type using serial and our notify class
-//
-//typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3; 
-
-// instance a DfMp3 object, 
-//
-//DfMp3 dfmp3(Serial);
-SoftwareSerial secondarySerial(10, 11); // RX, TX
-typedef DFMiniMp3<SoftwareSerial, Mp3Notify> DfMp3;
-DfMp3 dfmp3(secondarySerial);
-
-class Mp3Notify
-{
-public:
-  static void PrintlnSourceAction(DfMp3_PlaySources source, const char* action)
-  {
-    if (source & DfMp3_PlaySources_Sd) 
-    {
-        Serial.print("SD Card, ");
-    }
-    if (source & DfMp3_PlaySources_Usb) 
-    {
-        Serial.print("USB Disk, ");
-    }
-    if (source & DfMp3_PlaySources_Flash) 
-    {
-        Serial.print("Flash, ");
-    }
-    Serial.println(action);
-  }
-  static void OnError([[maybe_unused]] DfMp3& mp3, uint16_t errorCode)
-  {
-    // see DfMp3_Error for code meaning
-    Serial.println();
-    Serial.print("Com Error ");
-    Serial.println(errorCode);
-  }
-  static void OnPlayFinished([[maybe_unused]] DfMp3& mp3, [[maybe_unused]] DfMp3_PlaySources source, uint16_t track)
-  {
-    Serial.print("Play finished for #");
-    Serial.println(track);  
-  }
-  static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
-  {
-    PrintlnSourceAction(source, "online");
-  }
-  static void OnPlaySourceInserted([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
-  {
-    PrintlnSourceAction(source, "inserted");
-  }
-  static void OnPlaySourceRemoved([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
-  {
-    PrintlnSourceAction(source, "removed");
-  }
-};
-
+MP3Trigger mp3Trigger;
 USB Usb;
 XBOXRECV Xbox(&Usb);
 
@@ -260,28 +201,8 @@ void setup() {
   pinMode(EXTINGUISHERPIN, OUTPUT);
   digitalWrite(EXTINGUISHERPIN, HIGH);
 
-  // mp3Trigger.setup();
-  // mp3Trigger.setVolume(vol);
-
-  // init mp3 trigger
-  dfmp3.begin();
-  //Serial.begin(115200);
-  //dfmp3.reset();
-
-  //uint16_t vol = dfmp3.getVolume();
-  //Serial.print("volume ");
-  //Serial.println(vol);
-  dfmp3.setVolume(vol);
-
-  uint16_t count = dfmp3.getTotalTrackCount(DfMp3_PlaySource_Sd);
-  Serial.print("files ");
-  Serial.println(count);
-
-  uint16_t mode = dfmp3.getPlaybackMode();
-  Serial.print("playback mode ");
-  Serial.println(mode);
-  
-  Serial.println("starting...");
+  mp3Trigger.setup();
+  mp3Trigger.setVolume(vol);
 
   if(isLeftStickDrive) {
     throttleAxis = LeftHatY;
@@ -329,7 +250,7 @@ void loop() {
   // After the controller connects, Blink all the LEDs so we know drives are disengaged at start
   if (!firstLoadOnConnect) {
     firstLoadOnConnect = true;
-    dfmp3.playGlobalTrack(21);
+    mp3Trigger.play(21);
     Xbox.setLedMode(ROTATING, 0);
   }
   
@@ -344,10 +265,10 @@ void loop() {
     if (isDriveEnabled) {
       isDriveEnabled = false;
       Xbox.setLedMode(ROTATING, 0);
-      dfmp3.playGlobalTrack(53);
+      mp3Trigger.play(53);
     } else {
       isDriveEnabled = true;
-      dfmp3.playGlobalTrack(52);
+      mp3Trigger.play(52);
       // //When the drive is enabled, set our LED accordingly to indicate speed
       if (drivespeed == DRIVESPEED1) {
         Xbox.setLedOn(LED1, 0);
@@ -364,10 +285,10 @@ void loop() {
     if (isInAutomationMode) {
       isInAutomationMode = false;
       automateAction = 0;
-      dfmp3.playGlobalTrack(53);
+      mp3Trigger.play(53);
     } else {
       isInAutomationMode = true;
-      dfmp3.playGlobalTrack(52);
+      mp3Trigger.play(52);
     }
   }
 
@@ -380,7 +301,7 @@ void loop() {
       automateAction = random(1, 5);
 
       if (automateAction > 1) {
-        dfmp3.playGlobalTrack(random(32, 52));
+        mp3Trigger.play(random(32, 52));
       }
       if (automateAction < 4) {
 #if defined(SYRENSIMPLE)
@@ -416,7 +337,7 @@ void loop() {
     if (Xbox.getButtonPress(R1, 0)) {
       if (vol > 0) {
         vol--;
-        dfmp3.setVolume(vol);
+        mp3Trigger.setVolume(vol);
       }
     }
   }
@@ -425,7 +346,7 @@ void loop() {
     if (Xbox.getButtonPress(R1, 0)) {
       if (vol < 255) {
         vol++;
-        dfmp3.setVolume(vol);
+        mp3Trigger.setVolume(vol);
       }
     }
   }
@@ -463,19 +384,19 @@ void loop() {
   // Y Button and Y combo buttons
   if (Xbox.getButtonClick(Y, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
-      dfmp3.playGlobalTrack(8);
+      mp3Trigger.play(8);
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(L2, 0)) {
-      dfmp3.playGlobalTrack(2);
+      mp3Trigger.play(2);
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(R1, 0)) {
-      dfmp3.playGlobalTrack(9);
+      mp3Trigger.play(9);
       //logic lights, random
       triggerI2C(10, 0);
     } else {
-      dfmp3.playGlobalTrack(random(13, 17));
+      mp3Trigger.play(random(13, 17));
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -484,7 +405,7 @@ void loop() {
   // A Button and A combo Buttons
   if (Xbox.getButtonClick(A, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
-      dfmp3.playGlobalTrack(6);
+      mp3Trigger.play(6);
       //logic lights
       triggerI2C(10, 6);
       // HPEvent 11 - SystemFailure - I2C
@@ -492,7 +413,7 @@ void loop() {
       triggerI2C(26, 11);
       triggerI2C(27, 11);
     } else if (Xbox.getButtonPress(L2, 0)) {
-      dfmp3.playGlobalTrack(1);
+      mp3Trigger.play(1);
       //logic lights, alarm
       triggerI2C(10, 1);
       //  HPEvent 3 - alarm - I2C
@@ -500,11 +421,11 @@ void loop() {
       triggerI2C(26, 3);
       triggerI2C(27, 3);
     } else if (Xbox.getButtonPress(R1, 0)) {
-      dfmp3.playGlobalTrack(11);
+      mp3Trigger.play(11);
       //logic lights, alarm2Display
       triggerI2C(10, 11);
     } else {
-      dfmp3.playGlobalTrack(random(17, 25));
+      mp3Trigger.play(random(17, 25));
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -513,15 +434,15 @@ void loop() {
   // B Button and B combo Buttons
   if (Xbox.getButtonClick(B, 0)) {
     if (Xbox.getButtonPress(L1, 0)) {
-      dfmp3.playGlobalTrack(7);
+      mp3Trigger.play(7);
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(L2, 0)) {
-      dfmp3.playGlobalTrack(3);
+      mp3Trigger.play(3);
       //logic lights, random
       triggerI2C(10, 0);
     } else if (Xbox.getButtonPress(R1, 0)) {
-      dfmp3.playGlobalTrack(10);
+      mp3Trigger.play(10);
       //logic lights bargrap
       triggerI2C(10, 10);
       // HPEvent 1 - Disco - I2C
@@ -529,7 +450,7 @@ void loop() {
       triggerI2C(26, 10);
       triggerI2C(27, 10);
     } else {
-      dfmp3.playGlobalTrack(random(32, 52));
+      mp3Trigger.play(random(32, 52));
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -539,21 +460,21 @@ void loop() {
   if (Xbox.getButtonClick(X, 0)) {
     // leia message L1+X
     if (Xbox.getButtonPress(L1, 0)) {
-      dfmp3.playGlobalTrack(5);
+      mp3Trigger.play(5);
       //logic lights, leia message
       triggerI2C(10, 5);
       // Front HPEvent 1 - HoloMessage - I2C -leia message
       triggerI2C(25, 9);
     } else if (Xbox.getButtonPress(L2, 0)) {
-      dfmp3.playGlobalTrack(4);
+      mp3Trigger.play(4);
       //logic lights
       triggerI2C(10, 4);
     } else if (Xbox.getButtonPress(R1, 0)) {
-      dfmp3.playGlobalTrack(12);
+      mp3Trigger.play(12);
       //logic lights, random
       triggerI2C(10, 0);
     } else {
-      dfmp3.playGlobalTrack(random(25, 32));
+      mp3Trigger.play(random(25, 32));
       //logic lights, random
       triggerI2C(10, 0);
     }
@@ -587,20 +508,20 @@ void loop() {
       //change to medium speed and play sound 3-tone
       drivespeed = DRIVESPEED2;
       Xbox.setLedOn(LED2, 0);
-      dfmp3.playGlobalTrack(53);
+      mp3Trigger.play(53);
       triggerI2C(10, 22);
     } else if (drivespeed == DRIVESPEED2 && (DRIVESPEED3 != 0)) {
       //change to high speed and play sound scream
       drivespeed = DRIVESPEED3;
       Xbox.setLedOn(LED3, 0);
-      dfmp3.playGlobalTrack(1);
+      mp3Trigger.play(1);
       triggerI2C(10, 23);
     } else {
       //we must be in high speed
       //change to low speed and play sound 2-tone
       drivespeed = DRIVESPEED1;
       Xbox.setLedOn(LED1, 0);
-      dfmp3.playGlobalTrack(52);
+      mp3Trigger.play(52);
       triggerI2C(10, 21);
     }
   }
