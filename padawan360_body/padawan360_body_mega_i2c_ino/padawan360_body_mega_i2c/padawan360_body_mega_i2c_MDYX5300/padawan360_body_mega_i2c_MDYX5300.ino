@@ -1,16 +1,62 @@
-//************************** Set speed and turn speeds here************************************//
+// =======================================================================================
+// /////////////////////////Padawan360 Body Code - Mega I2C v2.0 ////////////////////////////////////
+// =======================================================================================
+/*
+by Dan Kraus
+dskraus@gmail.com
+Astromech: danomite4047
+Project Site: https://github.com/dankraus/padawan360/
 
+Heavily influenced by DanF's Padwan code which was built for Arduino+Wireless PS2
+controller leveraging Bill Porter's PS2X Library. I was running into frequent disconnect
+issues with 4 different controllers working in various capacities or not at all. I decided
+that PS2 Controllers were going to be more difficult to come by every day, so I explored
+some existing libraries out there to leverage and came across the USB Host Shield and it's
+support for PS3 and Xbox 360 controllers. Bluetooth dongles were inconsistent as well
+so I wanted to be able to have something with parts that other builder's could easily track
+down and buy parts even at your local big box store.
+
+v2.0 Changes:
+- Makes left analog stick default drive control stick. Configurable between left or right stick via isLeftStickDrive 
+
+Hardware:
+***Arduino Mega 2560***
+USB Host Shield from circuits@home
+Microsoft Xbox 360 Controller
+Xbox 360 USB Wireless Reciver
+Sabertooth Motor Controller
+Syren Motor Controller
+Sparkfun MP3 Trigger
+
+This sketch supports I2C and calls events on many sound effect actions to control lights and sounds.
+It is NOT set up for Dan's method of using the serial packet to transfer data up to the dome
+to trigger some light effects.It uses Hardware Serial pins on the Mega to control Sabertooth and Syren
+
+Set Sabertooth 2x25/2x12 Dip Switches 1 and 2 Down, All Others Up
+For SyRen Simple Serial Set Switches 1 and 2 Down, All Others Up
+For SyRen Simple Serial Set Switchs 2 & 4 Down, All Others Up
+Placed a 10K ohm resistor between S1 & GND on the SyRen 10 itself
+
+*/
+
+// ************************** Options, Configurations, and Settings ***********************************
+
+
+// SPEED AND TURN SPEEDS
 //set these 3 to whatever speeds work for you. 0-stop, 127-full speed.
 const byte DRIVESPEED1 = 50;
-//Recommend beginner: 50 to 75, experienced: 100 to 127, I like 100.
+// Recommend beginner: 50 to 75, experienced: 100 to 127, I like 100. 
+// These may vary based on your drive system and power system
 const byte DRIVESPEED2 = 100;
 //Set to 0 if you only want 2 speeds.
 const byte DRIVESPEED3 = 127;
 
+// Default drive speed at startup
 byte drivespeed = DRIVESPEED1;
 
 // the higher this number the faster the droid will spin in place, lower - easier to control.
 // Recommend beginner: 40 to 50, experienced: 50 $ up, I like 70
+// This may vary based on your drive system and power system
 const byte TURNSPEED = 70;
 
 // Set isLeftStickDrive to true for driving  with the left stick
@@ -20,7 +66,7 @@ boolean isLeftStickDrive = true;
 // If using a speed controller for the dome, sets the top speed. You'll want to vary it potenitally
 // depending on your motor. My Pittman is really fast so I dial this down a ways from top speed.
 // Use a number up to 127 for serial
-const byte DOMESPEED = 80;
+const byte DOMESPEED = 110;
 
 // Ramping- the lower this number the longer R2 will take to speedup or slow down,
 // change this by incriments of 1
@@ -37,25 +83,35 @@ const byte RAMPING = 5;
 const byte DOMEDEADZONERANGE = 20;
 const byte DRIVEDEADZONERANGE = 20;
 
-// Set the baude rate for the Syren motor controller
+// Set the baude rate for the Sabertooth motor controller (feet)
+// 9600 is the default baud rate for Sabertooth packet serial.
 // for packetized options are: 2400, 9600, 19200 and 38400. I think you need to pick one that works
 // and I think it varies across different firmware versions.
-// for simple serial use 9600
-const int DOMEBAUDRATE = 9600;
+const int SABERTOOTHBAUDRATE = 9600;
 
-// Comment the SYRENSIMPLE out for packetized serial connection to Syren - Recomended.
-// I've never tested Syrene Simple, it's a carry-over from DanF's library.
-// Un-comment for simple serial - do not use in close contact with people
-//#define SYRENSIMPLE
+// Set the baude rate for the Syren motor controller (dome)
+// for packetized options are: 2400, 9600, 19200 and 38400. I think you need to pick one that works
+// and I think it varies across different firmware versions.
+const int DOMEBAUDRATE = 2400;
 
+// Default sound volume at startup
+// 0 = full volume, 255 off
+int vol = 14;
+
+
+// Automation Delays
+// set automateDelay to min and max seconds between sounds
+byte automateDelay = random(5, 20); 
+//How much the dome may turn during automation.
+int turnDirection = 20;
+
+// Pin number to pull a relay high/low to trigger my upside down compressed air like R2's extinguisher
 #define EXTINGUISHERPIN 3
 
 #include <Sabertooth.h>
-#include <SyRenSimplified.h>
-#include <Servo.h>
 #include <MD_YX5300.h>
+#include <Wire.h>
 #include <XBOXRECV.h>
-#include <SoftwareSerial.h>
 
 // Connections for serial interface to the YX5300 module
 #define MP3Stream Serial  // Native serial port - change to suit the application
@@ -63,17 +119,10 @@ const int DOMEBAUDRATE = 9600;
 // Define global variables
 MD_YX5300 mp3(MP3Stream);
 
-// These are the pins for the Sabertooth and Syren
-SoftwareSerial STSerial(NOT_A_PIN, 4);
-SoftwareSerial SyRSerial(2, 5);
 
 /////////////////////////////////////////////////////////////////
-Sabertooth ST(128, STSerial);
-#if defined(SYRENSIMPLE)
-SyRenSimplified SyR(SyRSerial); // Use SWSerial as the serial port.
-#else
-Sabertooth SyR(128, SyRSerial);
-#endif
+Sabertooth Sabertooth2x(128, Serial1);
+Sabertooth Syren10(128, Serial2);
 
 // Satisfy IDE, which only needs to see the include statment in the ino.
 #ifdef dobogusinclude
@@ -81,26 +130,16 @@ Sabertooth SyR(128, SyRSerial);
 #endif
 
 // Set some defaults for start up
-// 0 = full volume, 255 off
-int vol = 14;
-
-// 0 = drive motors off ( right stick disabled ) at start
+// false = drive motors off ( right stick disabled ) at start
 boolean isDriveEnabled = false;
 
-USB Usb;
-XBOXRECV Xbox(&Usb);
-
-// read the switboolean isDriveEnabled = false;
-
-// Automated function variables
+// Automated functionality
 // Used as a boolean to turn on/off automated functions like periodic random sounds and periodic dome turns
 boolean isInAutomationMode = false;
 unsigned long automateMillis = 0;
-byte automateDelay = random(5,20);// set this to min and max seconds between sounds
-//How much the dome may turn during automation.
-int turnDirection = 20;
 // Action number used to randomly choose a sound effect or a dome turn
 byte automateAction = 0;
+
 
 int driveThrottle = 0;
 int throttleStickValue = 0;
@@ -116,23 +155,37 @@ ButtonEnum speedSelectButton;
 ButtonEnum hpLightToggleButton;
 
 
+// this is legacy right now. The rest of the sketch isn't set to send any of this
+// data to another arduino like the original Padawan sketch does
+// right now just using it to track whether or not the HP light is on so we can
+// fire the correct I2C event to turn on/off the HP light.
+//struct SEND_DATA_STRUCTURE{
+//  //put your variable definitions here for the data you want to send
+//  //THIS MUST BE EXACTLY THE SAME ON THE OTHER ARDUINO
+//  int hpl; // hp light
+//  int dsp; // 0 = random, 1 = alarm, 5 = leia, 11 = alarm2, 100 = no change
+//};
+//SEND_DATA_STRUCTURE domeData;//give a name to the group of data
+
 boolean isHPOn = false;
 
-void setup(){
+USB Usb;
+XBOXRECV Xbox(&Usb);
+
+void setup() {
   MP3Stream.begin(MD_YX5300::SERIAL_BPS);
   mp3.begin();
   mp3.volume(vol);
-  SyRSerial.begin(DOMEBAUDRATE);
-  #if defined(SYRENSIMPLE)
-    SyR.motor(0);
-  #else
-    SyR.autobaud();
-  #endif
+  Serial1.begin(SABERTOOTHBAUDRATE);
+  Serial2.begin(DOMEBAUDRATE);
 
-  // 9600 is the default baud rate for Sabertooth packet serial.
-  STSerial.begin(9600);
+#if defined(SYRENSIMPLE)
+  Syren10.motor(0);
+#else
+  Syren10.autobaud();
+#endif
+
   // Send the autobaud command to the Sabertooth controller(s).
-  ST.autobaud();
   /* NOTE: *Not all* Sabertooth controllers need this command.
   It doesn't hurt anything, but V2 controllers use an
   EEPROM setting (changeable with the function setBaudRate) to set
@@ -140,20 +193,20 @@ void setup(){
   If you have a 2x12, 2x25 V2, 2x60 or SyRen 50, you can remove
   the autobaud line and save yourself two seconds of startup delay.
   */
-
-  ST.setTimeout(950);
-  #if !defined(SYRENSIMPLE)
-    SyR.setTimeout(950);
-  #endif
-
+  Sabertooth2x.autobaud();
   // The Sabertooth won't act on mixed mode packet serial commands until
   // it has received power levels for BOTH throttle and turning, since it
   // mixes the two together to get diff-drive power levels for both motors.
-  ST.drive(0);
-  ST.turn(0);
+  Sabertooth2x.drive(0);
+  Sabertooth2x.turn(0);
+
+
+  Sabertooth2x.setTimeout(950);
+  Syren10.setTimeout(950);
 
   pinMode(EXTINGUISHERPIN, OUTPUT);
   digitalWrite(EXTINGUISHERPIN, HIGH);
+
 
   if(isLeftStickDrive) {
     throttleAxis = LeftHatY;
@@ -171,33 +224,36 @@ void setup(){
   }
 
 
-//   Serial.begin(115200);
+ // Start I2C Bus. The body is the master.
+  Wire.begin();
+
+  //Serial.begin(115200);
   // Wait for serial port to connect - used on Leonardo, Teensy and other boards with built-in USB CDC serial connection
   while (!Serial);
-    if (Usb.Init() == -1) {
-      //Serial.print(F("\r\nOSC did not start"));
-      while (1); //halt
-    }
-  Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
+  if (Usb.Init() == -1) {
+    //Serial.print(F("\r\nOSC did not start"));
+    while (1); //halt
+  }
+  //Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
 }
 
 
-void loop(){
+void loop() {
   Usb.Task();
   mp3.getStatus();
   // if we're not connected, return so we don't bother doing anything else.
   // set all movement to 0 so if we lose connection we don't have a runaway droid!
   // a restraining bolt and jawa droid caller won't save us here!
-  if(!Xbox.XboxReceiverConnected || !Xbox.Xbox360Connected[0]){
-    ST.drive(0);
-    ST.turn(0);
-    SyR.motor(1,0);
+  if (!Xbox.XboxReceiverConnected || !Xbox.Xbox360Connected[0]) {
+    Sabertooth2x.drive(0);
+    Sabertooth2x.turn(0);
+    Syren10.motor(1, 0);
     firstLoadOnConnect = false;
     return;
   }
 
   // After the controller connects, Blink all the LEDs so we know drives are disengaged at start
-  if(!firstLoadOnConnect){
+  if (!firstLoadOnConnect) {
     firstLoadOnConnect = true;
     mp3.playTrack(21);
     Xbox.setLedMode(ROTATING, 0);
@@ -210,8 +266,8 @@ void loop(){
   }
 
   // enable / disable right stick (droid movement) & play a sound to signal motor state
-  if(Xbox.getButtonClick(START, 0)) {
-    if(isDriveEnabled){
+  if (Xbox.getButtonClick(START, 0)) {
+    if (isDriveEnabled) {
       isDriveEnabled = false;
       Xbox.setLedMode(ROTATING, 0);
       mp3.playTrack(53);
@@ -219,9 +275,9 @@ void loop(){
       isDriveEnabled = true;
       mp3.playTrack(52);
       // //When the drive is enabled, set our LED accordingly to indicate speed
-      if(drivespeed == DRIVESPEED1){
+      if (drivespeed == DRIVESPEED1) {
         Xbox.setLedOn(LED1, 0);
-      } else if(drivespeed == DRIVESPEED2 && (DRIVESPEED3!=0)){
+      } else if (drivespeed == DRIVESPEED2 && (DRIVESPEED3 != 0)) {
         Xbox.setLedOn(LED2, 0);
       } else {
         Xbox.setLedOn(LED3, 0);
@@ -230,8 +286,8 @@ void loop(){
   }
 
   //Toggle automation mode with the BACK button
-  if(Xbox.getButtonClick(BACK, 0)) {
-    if(isInAutomationMode){
+  if (Xbox.getButtonClick(BACK, 0)) {
+    if (isInAutomationMode) {
       isInAutomationMode = false;
       automateAction = 0;
       mp3.playTrack(53);
@@ -242,32 +298,32 @@ void loop(){
   }
 
   // Plays random sounds or dome movements for automations when in automation mode
-  if(isInAutomationMode){
+  if (isInAutomationMode) {
     unsigned long currentMillis = millis();
 
-    if(currentMillis - automateMillis > (automateDelay*1000)){
+    if (currentMillis - automateMillis > (automateDelay * 1000)) {
       automateMillis = millis();
-      automateAction = random(1,5);
+      automateAction = random(1, 5);
 
-      if(automateAction > 1){
-        mp3.playTrack(random(32,52));
+      if (automateAction > 1) {
+        mp3.playTrack(random(32, 52));
       }
-      if(automateAction < 4){
-        #if defined(SYRENSIMPLE)
-          SyR.motor(turnDirection);
-        #else
-          SyR.motor(1,turnDirection);
-        #endif
+      if (automateAction < 4) {
+#if defined(SYRENSIMPLE)
+        Syren10.motor(turnDirection);
+#else
+        Syren10.motor(1, turnDirection);
+#endif
 
         delay(750);
 
-        #if defined(SYRENSIMPLE)
-          SyR.motor(0);
-        #else
-          SyR.motor(1,0);
-        #endif
+#if defined(SYRENSIMPLE)
+        Syren10.motor(0);
+#else
+        Syren10.motor(1, 0);
+#endif
 
-        if(turnDirection > 0){
+        if (turnDirection > 0) {
           turnDirection = -45;
         } else {
           turnDirection = 45;
@@ -275,7 +331,7 @@ void loop(){
       }
 
       // sets the mix, max seconds between automation actions - sounds and dome movement
-      automateDelay = random(5,20);
+      automateDelay = random(3,10);
     }
   }
 
@@ -302,16 +358,16 @@ void loop(){
 
   // Logic display brightness.
   // Hold L1 and press up/down on dpad to increase/decrease brightness
-  /*
-  if(Xbox.getButtonClick(UP, 0)){
-    if(Xbox.getButtonPress(L1, 0)){
+  if (Xbox.getButtonClick(UP, 0)) {
+    if (Xbox.getButtonPress(L1, 0)) {
+      triggerI2C(10, 24);
     }
   }
-  if(Xbox.getButtonClick(DOWN, 0)){
-    if(Xbox.getButtonPress(L1, 0)){
+  if (Xbox.getButtonClick(DOWN, 0)) {
+    if (Xbox.getButtonPress(L1, 0)) {
+      triggerI2C(10, 25);
     }
   }
-  */
 
 
   //FIRE EXTINGUISHER
@@ -319,8 +375,8 @@ void loop(){
 
   // TODO: ADD SERVO DOOR OPEN FIRST. ONLY ALLOW EXTINGUISHER ONCE IT'S SET TO 'OPENED'
   // THEN CLOSE THE SERVO DOOR
-  if(Xbox.getButtonPress(L1, 0)){
-    if(Xbox.getButtonPress(UP, 0)){
+  if (Xbox.getButtonPress(L1, 0)) {
+    if (Xbox.getButtonPress(UP, 0)) {
       digitalWrite(EXTINGUISHERPIN, LOW);
     } else {
       digitalWrite(EXTINGUISHERPIN, HIGH);
@@ -331,100 +387,152 @@ void loop(){
   // GENERAL SOUND PLAYBACK AND DISPLAY CHANGING
 
   // Y Button and Y combo buttons
-  if(Xbox.getButtonClick(Y, 0)){
-    if(Xbox.getButtonPress(L1, 0)){
+  if (Xbox.getButtonClick(Y, 0)) {
+    if (Xbox.getButtonPress(L1, 0)) {
       mp3.playTrack(8);
-    } else if(Xbox.getButtonPress(L2, 0)){
+      //logic lights, random
+      triggerI2C(10, 0);
+    } else if (Xbox.getButtonPress(L2, 0)) {
       mp3.playTrack(2);
-    } else if(Xbox.getButtonPress(R1, 0)){
+      //logic lights, random
+      triggerI2C(10, 0);
+    } else if (Xbox.getButtonPress(R1, 0)) {
       mp3.playTrack(9);
+      //logic lights, random
+      triggerI2C(10, 0);
     } else {
-      mp3.playTrack(random(13,17));
+      mp3.playTrack(random(13, 17));
+      //logic lights, random
+      triggerI2C(10, 0);
     }
   }
 
   // A Button and A combo Buttons
-  if(Xbox.getButtonClick(A, 0)){
-    if(Xbox.getButtonPress(L1, 0)){
+  if (Xbox.getButtonClick(A, 0)) {
+    if (Xbox.getButtonPress(L1, 0)) {
       mp3.playTrack(6);
-    } else if(Xbox.getButtonPress(L2, 0)){
+      //logic lights
+      triggerI2C(10, 6);
+      // HPEvent 11 - SystemFailure - I2C
+      triggerI2C(25, 11);
+      triggerI2C(26, 11);
+      triggerI2C(27, 11);
+    } else if (Xbox.getButtonPress(L2, 0)) {
       mp3.playTrack(1);
-    } else if(Xbox.getButtonPress(R1, 0)){
+      //logic lights, alarm
+      triggerI2C(10, 1);
+      //  HPEvent 3 - alarm - I2C
+      triggerI2C(25, 3);
+      triggerI2C(26, 3);
+      triggerI2C(27, 3);
+    } else if (Xbox.getButtonPress(R1, 0)) {
       mp3.playTrack(11);
+      //logic lights, alarm2Display
+      triggerI2C(10, 11);
     } else {
-      mp3.playTrack(random(17,25));
+      mp3.playTrack(random(17, 25));
+      //logic lights, random
+      triggerI2C(10, 0);
     }
   }
 
   // B Button and B combo Buttons
-  if(Xbox.getButtonClick(B, 0)){
-    if(Xbox.getButtonPress(L1, 0)){
+  if (Xbox.getButtonClick(B, 0)) {
+    if (Xbox.getButtonPress(L1, 0)) {
       mp3.playTrack(7);
-    } else if(Xbox.getButtonPress(L2, 0)){
+      //logic lights, random
+      triggerI2C(10, 0);
+    } else if (Xbox.getButtonPress(L2, 0)) {
       mp3.playTrack(3);
-    } else if(Xbox.getButtonPress(R1, 0)){
+      //logic lights, random
+      triggerI2C(10, 0);
+    } else if (Xbox.getButtonPress(R1, 0)) {
       mp3.playTrack(10);
+      //logic lights bargrap
+      triggerI2C(10, 10);
+      // HPEvent 1 - Disco - I2C
+      triggerI2C(25, 10);
+      triggerI2C(26, 10);
+      triggerI2C(27, 10);
     } else {
-      mp3.playTrack(random(32,52));
+      mp3.playTrack(random(32, 52));
+      //logic lights, random
+      triggerI2C(10, 0);
     }
   }
 
   // X Button and X combo Buttons
-  if(Xbox.getButtonClick(X, 0)){
+  if (Xbox.getButtonClick(X, 0)) {
     // leia message L1+X
-    if(Xbox.getButtonPress(L1, 0)){
+    if (Xbox.getButtonPress(L1, 0)) {
       mp3.playTrack(5);
-    } else if(Xbox.getButtonPress(L2, 0)){
+      //logic lights, leia message
+      triggerI2C(10, 5);
+      // Front HPEvent 1 - HoloMessage - I2C -leia message
+      triggerI2C(25, 9);
+    } else if (Xbox.getButtonPress(L2, 0)) {
       mp3.playTrack(4);
-    } else if(Xbox.getButtonPress(R1, 0)){
+      //logic lights
+      triggerI2C(10, 4);
+    } else if (Xbox.getButtonPress(R1, 0)) {
       mp3.playTrack(12);
+      //logic lights, random
+      triggerI2C(10, 0);
     } else {
-      mp3.playTrack(random(25,32));
+      mp3.playTrack(random(25, 32));
+      //logic lights, random
+      triggerI2C(10, 0);
     }
   }
 
   // turn hp light on & off with Right Analog Stick Press (R3) for left stick drive mode
   // turn hp light on & off with Left Analog Stick Press (L3) for right stick drive mode
-  /*
-  if(Xbox.getButtonClick(hpLightToggleButton, 0))  {
+  if (Xbox.getButtonClick(hpLightToggleButton, 0))  {
     // if hp light is on, turn it off
-    if(isHPOn){
+    if (isHPOn) {
       isHPOn = false;
       // turn hp light off
+      // Front HPEvent 2 - ledOFF - I2C
+      triggerI2C(25, 2);
     } else {
       isHPOn = true;
       // turn hp light on
+      // Front HPEvent 4 - whiteOn - I2C
+      triggerI2C(25, 1);
     }
   }
-  */
 
 
-  // Change drivespeed if drive is eabled
+  // Change drivespeed if drive is enabled
   // Press Left Analog Stick (L3) for left stick drive mode
   // Press Right Analog Stick (R3) for right stick drive mode
   // Set LEDs for speed - 1 LED, Low. 2 LED - Med. 3 LED High
-  if(Xbox.getButtonClick(speedSelectButton, 0) && isDriveEnabled) {
+  if (Xbox.getButtonClick(speedSelectButton, 0) && isDriveEnabled) {
     //if in lowest speed
-    if(drivespeed == DRIVESPEED1){
+    if (drivespeed == DRIVESPEED1) {
       //change to medium speed and play sound 3-tone
       drivespeed = DRIVESPEED2;
       Xbox.setLedOn(LED2, 0);
       mp3.playTrack(53);
-    } else if(drivespeed == DRIVESPEED2 && (DRIVESPEED3!=0)){
+      triggerI2C(10, 22);
+    } else if (drivespeed == DRIVESPEED2 && (DRIVESPEED3 != 0)) {
       //change to high speed and play sound scream
       drivespeed = DRIVESPEED3;
       Xbox.setLedOn(LED3, 0);
       mp3.playTrack(1);
+      triggerI2C(10, 23);
     } else {
       //we must be in high speed
       //change to low speed and play sound 2-tone
       drivespeed = DRIVESPEED1;
       Xbox.setLedOn(LED1, 0);
       mp3.playTrack(52);
+      triggerI2C(10, 21);
     }
   }
 
 
+ 
   // FOOT DRIVES
   // Xbox 360 analog stick values are signed 16 bit integer value
   // Sabertooth runs at 8 bit signed. -127 to 127 for speed (full speed reverse and  full speed forward)
@@ -460,8 +568,8 @@ void loop(){
       // stick is in dead zone - don't turn
       turnThrottle = 0;
     }
-    ST.turn(-turnThrottle);
-    ST.drive(driveThrottle);
+    Sabertooth2x.turn(-turnThrottle);
+    Sabertooth2x.drive(driveThrottle);
   }
 
   // DOME DRIVE!
@@ -471,9 +579,11 @@ void loop(){
     domeThrottle = 0;
   }
 
-  #if defined(SYRENSIMPLE)
-    SyR.motor(domeThrottle);
-  #else
-    SyR.motor(1,domeThrottle);
-  #endif
+  Syren10.motor(1, domeThrottle);
 } // END loop()
+
+void triggerI2C(byte deviceID, byte eventID) {
+  Wire.beginTransmission(deviceID);
+  Wire.write(eventID);
+  Wire.endTransmission();
+}

@@ -1,3 +1,44 @@
+// =======================================================================================
+// /////////////////////////Padawan360 Body Code v2.0 - UNO ////////////////////////////////////
+// =======================================================================================
+/*
+by Dan Kraus
+dskraus@gmail.com
+Astromech: danomite4047
+
+Heavily influenced by DanF's Padwan code which was built for Arduino+Wireless PS2
+controller leveraging Bill Porter's PS2X Library. I was running into frequent disconnect
+issues with 4 different controllers working in various capacities or not at all. I decided
+that PS2 Controllers were going to be more difficult to come by every day, so I explored
+some existing libraries out there to leverage and came across the USB Host Shield and it's
+support for PS3 and Xbox 360 controllers. Bluetooth dongles were inconsistent as well
+so I wanted to be able to have something with parts that other builder's could easily track
+down and buy parts even at your local big box store.
+
+v2.0 Changes:
+- Makes left analog stick default drive control stick. Configurable between left or right stick via isLeftStickDrive 
+
+Hardware:
+***Arduino UNO***
+USB Host Shield from circuits@home
+Microsoft Xbox 360 Controller
+Xbox 360 USB Wireless Reciver
+Sabertooth Motor Controller
+Syren Motor Controller
+Sparkfun MP3 Trigger
+
+This sketch supports DOES NOT SUPPORT I2C
+It is NOT YET set up for Dan's method of using the serial packet to transfer data up to the dome
+to trigger some light effects. If you want that, you'll need to reference DanF's original
+Padawan code or update it yourself and ask me to merge your updates into this one :)
+
+Set Sabertooth 2x25/2x12 Dip Switches 1 and 2 Down, All Others Up
+For SyRen Simple Serial Set Switches 1 and 2 Down, All Others Up
+For SyRen Simple Serial Set Switchs 2 & 4 Down, All Others Up
+Placed a 10K ohm resistor between S1 & GND on the SyRen 10 itself
+
+*/
+
 //************************** Set speed and turn speeds here************************************//
 
 //set these 3 to whatever speeds work for you. 0-stop, 127-full speed.
@@ -41,28 +82,23 @@ const byte DRIVEDEADZONERANGE = 20;
 // for packetized options are: 2400, 9600, 19200 and 38400. I think you need to pick one that works
 // and I think it varies across different firmware versions.
 // for simple serial use 9600
-const int DOMEBAUDRATE = 9600;
+const int DOMEBAUDRATE = 2400;
 
 // Comment the SYRENSIMPLE out for packetized serial connection to Syren - Recomended.
 // I've never tested Syrene Simple, it's a carry-over from DanF's library.
 // Un-comment for simple serial - do not use in close contact with people
 //#define SYRENSIMPLE
 
+// I have a pin set to pull a relay high/low to trigger my upside down compressed air like R2's extinguisher
 #define EXTINGUISHERPIN 3
 
 #include <Sabertooth.h>
 #include <SyRenSimplified.h>
 #include <Servo.h>
-#include <MD_YX5300.h>
+#include <MP3Trigger.h>
 #include <XBOXRECV.h>
+
 #include <SoftwareSerial.h>
-
-// Connections for serial interface to the YX5300 module
-#define MP3Stream Serial  // Native serial port - change to suit the application
-
-// Define global variables
-MD_YX5300 mp3(MP3Stream);
-
 // These are the pins for the Sabertooth and Syren
 SoftwareSerial STSerial(NOT_A_PIN, 4);
 SoftwareSerial SyRSerial(2, 5);
@@ -82,15 +118,9 @@ Sabertooth SyR(128, SyRSerial);
 
 // Set some defaults for start up
 // 0 = full volume, 255 off
-int vol = 14;
-
+byte vol = 20;
 // 0 = drive motors off ( right stick disabled ) at start
 boolean isDriveEnabled = false;
-
-USB Usb;
-XBOXRECV Xbox(&Usb);
-
-// read the switboolean isDriveEnabled = false;
 
 // Automated function variables
 // Used as a boolean to turn on/off automated functions like periodic random sounds and periodic dome turns
@@ -115,13 +145,26 @@ AnalogHatEnum domeAxis;
 ButtonEnum speedSelectButton;
 ButtonEnum hpLightToggleButton;
 
+// this is legacy right now. The rest of the sketch isn't set to send any of this
+// data to another arduino like the original Padawan sketch does
+// right now just using it to track whether or not the HP light is on so we can
+//struct SEND_DATA_STRUCTURE{
+//  //put your variable definitions here for the data you want to send
+//  //THIS MUST BE EXACTLY THE SAME ON THE OTHER ARDUINO
+//  int hpl; // hp light
+//  int dsp; // 0 = random, 1 = alarm, 5 = leia, 11 = alarm2, 100 = no change
+//};
+//SEND_DATA_STRUCTURE domeData;//give a name to the group of data
 
 boolean isHPOn = false;
 
+
+
+MP3Trigger mp3Trigger;
+USB Usb;
+XBOXRECV Xbox(&Usb);
+
 void setup(){
-  MP3Stream.begin(MD_YX5300::SERIAL_BPS);
-  mp3.begin();
-  mp3.volume(vol);
   SyRSerial.begin(DOMEBAUDRATE);
   #if defined(SYRENSIMPLE)
     SyR.motor(0);
@@ -155,6 +198,9 @@ void setup(){
   pinMode(EXTINGUISHERPIN, OUTPUT);
   digitalWrite(EXTINGUISHERPIN, HIGH);
 
+  mp3Trigger.setup();
+  mp3Trigger.setVolume(vol);
+
   if(isLeftStickDrive) {
     throttleAxis = LeftHatY;
     turnAxis = LeftHatX;
@@ -171,20 +217,19 @@ void setup(){
   }
 
 
-//   Serial.begin(115200);
+   //Serial.begin(115200);
   // Wait for serial port to connect - used on Leonardo, Teensy and other boards with built-in USB CDC serial connection
   while (!Serial);
     if (Usb.Init() == -1) {
       //Serial.print(F("\r\nOSC did not start"));
       while (1); //halt
     }
-  Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
+  //Serial.print(F("\r\nXbox Wireless Receiver Library Started"));
 }
 
 
 void loop(){
   Usb.Task();
-  mp3.getStatus();
   // if we're not connected, return so we don't bother doing anything else.
   // set all movement to 0 so if we lose connection we don't have a runaway droid!
   // a restraining bolt and jawa droid caller won't save us here!
@@ -199,7 +244,7 @@ void loop(){
   // After the controller connects, Blink all the LEDs so we know drives are disengaged at start
   if(!firstLoadOnConnect){
     firstLoadOnConnect = true;
-    mp3.playTrack(21);
+    mp3Trigger.play(21);
     Xbox.setLedMode(ROTATING, 0);
   }
   
@@ -214,10 +259,10 @@ void loop(){
     if(isDriveEnabled){
       isDriveEnabled = false;
       Xbox.setLedMode(ROTATING, 0);
-      mp3.playTrack(53);
+      mp3Trigger.play(53);
     } else {
       isDriveEnabled = true;
-      mp3.playTrack(52);
+      mp3Trigger.play(52);
       // //When the drive is enabled, set our LED accordingly to indicate speed
       if(drivespeed == DRIVESPEED1){
         Xbox.setLedOn(LED1, 0);
@@ -234,10 +279,10 @@ void loop(){
     if(isInAutomationMode){
       isInAutomationMode = false;
       automateAction = 0;
-      mp3.playTrack(53);
+      mp3Trigger.play(53);
     } else {
       isInAutomationMode = true;
-      mp3.playTrack(52);
+      mp3Trigger.play(52);
     }
   }
 
@@ -250,7 +295,7 @@ void loop(){
       automateAction = random(1,5);
 
       if(automateAction > 1){
-        mp3.playTrack(random(32,52));
+        mp3Trigger.play(random(32,52));
       }
       if(automateAction < 4){
         #if defined(SYRENSIMPLE)
@@ -284,18 +329,18 @@ void loop(){
   if(Xbox.getButtonClick(UP, 0)){
     // volume up
     if(Xbox.getButtonPress(R1, 0)){
-      if (vol < 30){
-        vol = vol + 2;
-        mp3.volume(vol);
+      if (vol > 0){
+        vol--;
+        mp3Trigger.setVolume(vol);
       }
     }
   }
   if(Xbox.getButtonClick(DOWN, 0)){
     //volume down
     if(Xbox.getButtonPress(R1, 0)){
-      if (vol > 0){
-        vol = vol - 2;
-        mp3.volume(vol);
+      if (vol < 255){
+        vol++;
+        mp3Trigger.setVolume(vol);
       }
     }
   }
@@ -333,39 +378,39 @@ void loop(){
   // Y Button and Y combo buttons
   if(Xbox.getButtonClick(Y, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      mp3.playTrack(8);
+      mp3Trigger.play(8);
     } else if(Xbox.getButtonPress(L2, 0)){
-      mp3.playTrack(2);
+      mp3Trigger.play(2);
     } else if(Xbox.getButtonPress(R1, 0)){
-      mp3.playTrack(9);
+      mp3Trigger.play(9);
     } else {
-      mp3.playTrack(random(13,17));
+      mp3Trigger.play(random(13,17));
     }
   }
 
   // A Button and A combo Buttons
   if(Xbox.getButtonClick(A, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      mp3.playTrack(6);
+      mp3Trigger.play(6);
     } else if(Xbox.getButtonPress(L2, 0)){
-      mp3.playTrack(1);
+      mp3Trigger.play(1);
     } else if(Xbox.getButtonPress(R1, 0)){
-      mp3.playTrack(11);
+      mp3Trigger.play(11);
     } else {
-      mp3.playTrack(random(17,25));
+      mp3Trigger.play(random(17,25));
     }
   }
 
   // B Button and B combo Buttons
   if(Xbox.getButtonClick(B, 0)){
     if(Xbox.getButtonPress(L1, 0)){
-      mp3.playTrack(7);
+      mp3Trigger.play(7);
     } else if(Xbox.getButtonPress(L2, 0)){
-      mp3.playTrack(3);
+      mp3Trigger.play(3);
     } else if(Xbox.getButtonPress(R1, 0)){
-      mp3.playTrack(10);
+      mp3Trigger.play(10);
     } else {
-      mp3.playTrack(random(32,52));
+      mp3Trigger.play(random(32,52));
     }
   }
 
@@ -373,13 +418,13 @@ void loop(){
   if(Xbox.getButtonClick(X, 0)){
     // leia message L1+X
     if(Xbox.getButtonPress(L1, 0)){
-      mp3.playTrack(5);
+      mp3Trigger.play(5);
     } else if(Xbox.getButtonPress(L2, 0)){
-      mp3.playTrack(4);
+      mp3Trigger.play(4);
     } else if(Xbox.getButtonPress(R1, 0)){
-      mp3.playTrack(12);
+      mp3Trigger.play(12);
     } else {
-      mp3.playTrack(random(25,32));
+      mp3Trigger.play(random(25,32));
     }
   }
 
@@ -409,18 +454,18 @@ void loop(){
       //change to medium speed and play sound 3-tone
       drivespeed = DRIVESPEED2;
       Xbox.setLedOn(LED2, 0);
-      mp3.playTrack(53);
+      mp3Trigger.play(53);
     } else if(drivespeed == DRIVESPEED2 && (DRIVESPEED3!=0)){
       //change to high speed and play sound scream
       drivespeed = DRIVESPEED3;
       Xbox.setLedOn(LED3, 0);
-      mp3.playTrack(1);
+      mp3Trigger.play(1);
     } else {
       //we must be in high speed
       //change to low speed and play sound 2-tone
       drivespeed = DRIVESPEED1;
       Xbox.setLedOn(LED1, 0);
-      mp3.playTrack(52);
+      mp3Trigger.play(52);
     }
   }
 
